@@ -6,7 +6,7 @@ on:
       build_name:
         description: 'Name for the build (out/<name>/)'
         required: true
-        default: 'm5a-gsi'
+        default: 'ulefone-note16pro-gsi'
       firmware_gdrive_id:
         description: 'Google Drive file ID of the firmware'
         required: true
@@ -49,7 +49,8 @@ jobs:
           sudo apt-get install -y python3 python3-venv erofs-utils aria2 patch \
             default-jre-headless curl build-essential cmake ninja-build pkg-config \
             perl golang-go libgtest-dev libusb-1.0-0-dev libpcre2-dev \
-            libprotobuf-dev protobuf-compiler libbrotli-dev liblz4-dev libzstd-dev
+            libprotobuf-dev protobuf-compiler libbrotli-dev liblz4-dev libzstd-dev \
+            libarchive-tools openssl
 
       - name: Install apktool
         run: |
@@ -63,16 +64,8 @@ jobs:
 
       - name: Run setup
         run: |
-          if [ -f setup.sh ]; then
-            chmod +x setup.sh
-            bash setup.sh
-          elif [ -f setup_host.py ]; then
-            python3 setup_host.py
-          else
-            echo "No setup.sh or setup_host.py found in the checkout"
-            ls -la
-            exit 1
-          fi
+          chmod +x setup_host.py
+          python3 setup_host.py
 
       - name: Download and extract firmware from Google Drive
         run: |
@@ -116,4 +109,3 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
