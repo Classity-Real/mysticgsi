@@ -1,0 +1,109 @@
+name: MysticGSI Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_name:
+        description: 'Name for the build (out/<name>/)'
+        required: true
+        default: 'm5a-gsi'
+      firmware_gdrive_id:
+        description: 'Google Drive file ID of the firmware'
+        required: true
+        default: '1ci0w8fFNeCFIQmyoaIzr1l-nLZsbwlMc'
+      rom_type:
+        description: 'ROM patch set (--type), leave empty for generic'
+        required: false
+        default: ''
+      compress:
+        description: 'Zip the resulting image'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -a -f || true
+          df -h
+
+      - name: Checkout MysticGSI
+        uses: actions/checkout@v4
+        with:
+          repository: MysticGSI/mysticgsi
+          path: mysticgsi
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-venv erofs-utils aria2 patch \
+            default-jre-headless curl build-essential cmake ninja-build pkg-config \
+            perl golang-go libgtest-dev libusb-1.0-0-dev libpcre2-dev \
+            libprotobuf-dev protobuf-compiler libbrotli-dev liblz4-dev libzstd-dev
+
+      - name: Install apktool
+        run: |
+          mkdir -p ~/.local/bin
+          ver=$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | grep -oP '"tag_name": "v\K[^"]+')
+          curl -fL -o ~/.local/bin/apktool.jar \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v${ver}/apktool_${ver}.jar"
+          printf '#!/bin/sh\nexec java -jar "$HOME/.local/bin/apktool.jar" "$@"\n' > ~/.local/bin/apktool
+          chmod +x ~/.local/bin/apktool
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run setup.sh
+        working-directory: mysticgsi
+        run: ./setup.sh
+
+      - name: Download and extract firmware from Google Drive
+        run: |
+          .venv/bin/python -m pip install -q gdown 2>/dev/null || pip install -q gdown
+          python3 -m gdown "${{ github.event.inputs.firmware_gdrive_id }}" -O firmware.zip
+          ls -lh firmware.zip
+          mkdir -p firmware_extracted
+          unzip -o firmware.zip -d firmware_extracted
+          PAC_FILE=$(find firmware_extracted -iname '*.pac' | head -n1)
+          if [ -z "$PAC_FILE" ]; then
+            echo "No .pac file found in the zip:"
+            find firmware_extracted -maxdepth 3
+            exit 1
+          fi
+          echo "Found: $PAC_FILE"
+          cp "$PAC_FILE" ../firmware.pac
+        working-directory: mysticgsi
+
+      - name: Build GSI
+        working-directory: mysticgsi
+        run: |
+          TYPE_ARG=""
+          if [ -n "${{ github.event.inputs.rom_type }}" ]; then
+            TYPE_ARG="--type ${{ github.event.inputs.rom_type }}"
+          fi
+          COMPRESS_ARG=""
+          if [ "${{ github.event.inputs.compress }}" = "true" ]; then
+            COMPRESS_ARG="--compress"
+          fi
+          .venv/bin/python cli.py build "${{ github.event.inputs.build_name }}" \
+            ../firmware.pac $TYPE_ARG $COMPRESS_ARG
+
+      - name: Prepare release tag
+        id: tag
+        run: echo "tag=gsi-${{ github.event.inputs.build_name }}-$(date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ github.event.inputs.build_name }}
+          files: mysticgsi/out/${{ github.event.inputs.build_name }}/*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
