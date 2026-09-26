@@ -6,7 +6,7 @@ on:
       build_name:
         description: 'Name for the build (out/<name>/)'
         required: true
-        default: 'ulefone-note16pro-gsi'
+        default: 'm5a-gsi'
       firmware_gdrive_id:
         description: 'Google Drive file ID of the firmware'
         required: true
@@ -69,8 +69,8 @@ jobs:
 
       - name: Download and extract firmware from Google Drive
         run: |
-          .venv/bin/python -m pip install -q gdown 2>/dev/null || pip install -q gdown
-          python3 -m gdown "${{ github.event.inputs.firmware_gdrive_id }}" -O firmware.zip
+          .venv/bin/python -m pip install -q gdown
+          .venv/bin/python -m gdown "${{ github.event.inputs.firmware_gdrive_id }}" -O firmware.zip
           ls -lh firmware.zip
           mkdir -p firmware_extracted
           unzip -o firmware.zip -d firmware_extracted
