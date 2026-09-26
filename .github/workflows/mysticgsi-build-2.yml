@@ -10,7 +10,7 @@ on:
       firmware_gdrive_id:
         description: 'Google Drive file ID of the firmware'
         required: true
-        default: '1ci0w8fFNeCFIQmyoaIzr1l-nLZsbwlMc'
+        default: '19-nXzREATwKnfJySzaOaNzhy6jGquGhO'
       rom_type:
         description: 'ROM patch set (--type), leave empty for generic'
         required: false
