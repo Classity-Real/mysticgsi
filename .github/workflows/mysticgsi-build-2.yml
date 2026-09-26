@@ -15,10 +15,6 @@ on:
         description: 'ROM patch set (--type), leave empty for generic'
         required: false
         default: ''
-      compress:
-        description: 'Zip the resulting image'
-        required: false
-        default: 'true'
 
 permissions:
   contents: write
@@ -104,12 +100,19 @@ jobs:
           if [ -n "${{ github.event.inputs.rom_type }}" ]; then
             TYPE_ARG="--type ${{ github.event.inputs.rom_type }}"
           fi
-          COMPRESS_ARG=""
-          if [ "${{ github.event.inputs.compress }}" = "true" ]; then
-            COMPRESS_ARG="--compress"
-          fi
           .venv/bin/python cli.py build "${{ github.event.inputs.build_name }}" \
-            firmware_super.img $TYPE_ARG $COMPRESS_ARG
+            firmware_super.img $TYPE_ARG
+
+      - name: Compress output with xz -9e
+        run: |
+          sudo apt-get install -y xz-utils
+          OUT_DIR="out/${{ github.event.inputs.build_name }}"
+          ls -lh "$OUT_DIR"
+          find "$OUT_DIR" -maxdepth 1 -iname '*.img' -print0 | while IFS= read -r -d '' f; do
+            echo "Compressing: $f"
+            xz -9e -T0 -v "$f"
+          done
+          ls -lh "$OUT_DIR"
 
       - name: Prepare release tag
         id: tag
@@ -120,7 +123,9 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ github.event.inputs.build_name }}
-          files: out/${{ github.event.inputs.build_name }}/*
+          files: |
+            out/${{ github.event.inputs.build_name }}/*.xz
+            out/${{ github.event.inputs.build_name }}/*.txt
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
