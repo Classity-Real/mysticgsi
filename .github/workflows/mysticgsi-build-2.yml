@@ -61,10 +61,18 @@ jobs:
           chmod +x ~/.local/bin/apktool
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Run setup.sh
+      - name: Run setup
         run: |
-          chmod +x setup.sh
-          bash setup.sh
+          if [ -f setup.sh ]; then
+            chmod +x setup.sh
+            bash setup.sh
+          elif [ -f setup_host.py ]; then
+            python3 setup_host.py
+          else
+            echo "No setup.sh or setup_host.py found in the checkout"
+            ls -la
+            exit 1
+          fi
 
       - name: Download and extract firmware from Google Drive
         run: |
@@ -108,3 +116,4 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
