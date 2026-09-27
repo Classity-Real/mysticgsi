@@ -1,4 +1,4 @@
-# MysticGSI
+# MysticGSI but workflow
 
 Builds a GSI (Generic System Image) from stock Android firmware.
 
@@ -7,7 +7,7 @@ Supported firmware: full OTA zips (`payload.bin`), fastboot packages and
 `UPDATE.APP`, Unisoc `.pac`, LG `.kdz`, Oppo `.ozip`, QFIL packages, Sony
 `.sin`, and Pixel factory images. Partitions can be ext4, EROFS or F2FS.
 
-## Setup
+## Setup (for local)
 
 Works on macOS, Ubuntu/Debian, Arch and NixOS. The build requires Python 3.10+.
 On macOS, install Homebrew and Xcode Command Line Tools first.
@@ -26,7 +26,7 @@ replace `.venv/bin/python` with `python3` in the commands below.
 You need erofs-utils 1.5+ for EROFS firmware (Ubuntu 24.04 or newer) and about
 20 GB of free space per build; larger firmware needs more.
 
-### Manual setup
+### Manual setup (for local)
 
 Swap `requirements.txt` for `requirements-dev.txt` if you want the dev tools.
 
@@ -87,7 +87,7 @@ python3 cli.py build <name> <firmware> --type <type>
 
 </details>
 
-#### apktool on Linux
+#### apktool on Linux (for local)
 
 Grab the latest `apktool_<version>.jar` from the
 [releases](https://github.com/iBotPeaches/Apktool/releases):
@@ -101,6 +101,14 @@ printf '#!/bin/sh\nexec java -jar "$HOME/.local/bin/apktool.jar" "$@"\n' \
 chmod +x ~/.local/bin/apktool
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+## Workflow Setup
+This works on anything (Mobile, PC, And any more devices that supports browser)
+By default, you will need to setup the devicename then your direct link (not click to download)
+and it will do the rest for you.
+
+You will need to fork this repository then enable actions from Actions tab
+then you will click MysticGSI Build then start the workflow! Put your values and directlink.
 
 ## Usage
 
