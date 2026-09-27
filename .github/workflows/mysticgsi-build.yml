@@ -6,11 +6,11 @@ on:
       build_name:
         description: 'Name for the build (out/<name>/)'
         required: true
-        default: 'm5a-gsi'
+        default: 'devicename-gsi'
       firmware_gdrive_id:
         description: 'Google Drive file ID of the firmware'
         required: true
-        default: '19-nXzREATwKnfJySzaOaNzhy6jGquGhO'
+        default: ''
       rom_type:
         description: 'ROM patch set (--type), leave empty for generic'
         required: false
@@ -66,6 +66,10 @@ jobs:
       - name: Download and extract firmware from Google Drive
         run: |
           .venv/bin/python -m pip install -q gdown
+          mkdir -p ~/.cache/gdown
+          if [ -n "${{ secrets.GDRIVE_COOKIES }}" ]; then
+            echo "${{ secrets.GDRIVE_COOKIES }}" > ~/.cache/gdown/cookies.txt
+          fi
           .venv/bin/python -m gdown "${{ github.event.inputs.firmware_gdrive_id }}" -O firmware.zip
           ls -lh firmware.zip
           mkdir -p firmware_extracted
