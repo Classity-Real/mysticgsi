@@ -7,8 +7,8 @@ on:
         description: 'Name for the build (out/<name>/)'
         required: true
         default: 'devicename-gsi'
-      firmware_gdrive_id:
-        description: 'Google Drive file ID of the firmware'
+      firmware_url:
+        description: 'Firmware URL (Google Drive, Mega.nz, or direct link)'
         required: true
         default: ''
       rom_type:
@@ -46,7 +46,7 @@ jobs:
             default-jre-headless curl build-essential cmake ninja-build pkg-config \
             perl golang-go libgtest-dev libusb-1.0-0-dev libpcre2-dev \
             libprotobuf-dev protobuf-compiler libbrotli-dev liblz4-dev libzstd-dev \
-            libarchive-tools openssl
+            libarchive-tools openssl file
 
       - name: Install apktool
         run: |
@@ -63,27 +63,92 @@ jobs:
           chmod +x setup_host.py
           python3 setup_host.py
 
-      - name: Download and extract firmware from Google Drive
+      - name: Download firmware (auto-detect host)
         run: |
-          .venv/bin/python -m pip install -q gdown
-          mkdir -p ~/.cache/gdown
-          if [ -n "${{ secrets.GDRIVE_COOKIES }}" ]; then
-            echo "${{ secrets.GDRIVE_COOKIES }}" > ~/.cache/gdown/cookies.txt
-          fi
-          .venv/bin/python -m gdown "${{ github.event.inputs.firmware_gdrive_id }}" -O firmware.zip
-          ls -lh firmware.zip
-          mkdir -p firmware_extracted
-          unzip -o firmware.zip -d firmware_extracted
-          PAC_FILE=$(find firmware_extracted -iname '*.pac' | head -n1)
-          if [ -z "$PAC_FILE" ]; then
-            echo "No .pac file found in the zip:"
-            find firmware_extracted -maxdepth 3
+          URL="${{ github.event.inputs.firmware_url }}"
+          mkdir -p dl
+          echo "URL: $URL"
+          case "$URL" in
+            *drive.google.com*)
+              echo "Detected: Google Drive"
+              .venv/bin/python -m pip install -q gdown
+              mkdir -p ~/.cache/gdown
+              if [ -n "${{ secrets.GDRIVE_COOKIES }}" ]; then
+                echo "${{ secrets.GDRIVE_COOKIES }}" > ~/.cache/gdown/cookies.txt
+              fi
+              .venv/bin/python -m gdown --fuzzy "$URL" -O dl/firmware.bin
+              ;;
+            *mega.nz*|*mega.co.nz*)
+              echo "Detected: Mega.nz"
+              sudo apt-get install -y megatools
+              megadl --path dl "$URL"
+              ;;
+            *)
+              echo "Detected: direct link"
+              aria2c -d dl -o firmware.bin -x4 -s4 "$URL"
+              ;;
+          esac
+          echo "Downloaded contents:"
+          find dl -maxdepth 1 -type f -exec ls -lh {} \;
+
+      - name: Extract firmware and locate super.img
+        run: |
+          DL_FILE=$(find dl -maxdepth 1 -type f | head -n1)
+          if [ -z "$DL_FILE" ]; then
+            echo "No file was downloaded."
             exit 1
           fi
-          echo "Found: $PAC_FILE"
-          cp "$PAC_FILE" firmware.pac
+          echo "Downloaded file: $DL_FILE"
+          MIME=$(file -b "$DL_FILE")
+          echo "Detected type: $MIME"
+
+          mkdir -p firmware_extracted
+          case "$MIME" in
+            *Zip*|*ZIP*)
+              unzip -o "$DL_FILE" -d firmware_extracted
+              ;;
+            *RAR*)
+              sudo apt-get install -y unrar-free || true
+              if command -v unrar-free >/dev/null 2>&1; then
+                unrar-free x "$DL_FILE" firmware_extracted/
+              elif command -v unrar >/dev/null 2>&1; then
+                unrar x -o+ "$DL_FILE" firmware_extracted/
+              else
+                sudo apt-get install -y p7zip-full
+                7z x "$DL_FILE" -ofirmware_extracted
+              fi
+              ;;
+            *7-zip*)
+              sudo apt-get install -y p7zip-full
+              7z x "$DL_FILE" -ofirmware_extracted
+              ;;
+            *)
+              cp "$DL_FILE" firmware_extracted/
+              ;;
+          esac
+
+          echo "Extracted contents:"
+          find firmware_extracted -maxdepth 4 -type f -exec ls -lh {} \;
+
+          PAC_FILE=$(find firmware_extracted -iname '*.pac' | head -n1)
+          SUPER_DIRECT=$(find firmware_extracted -iname 'super*.img' | head -n1)
+
+          if [ -n "$PAC_FILE" ]; then
+            echo "Found .pac: $PAC_FILE"
+            cp "$PAC_FILE" firmware.pac
+            echo "needs_pac_extract=true" >> "$GITHUB_ENV"
+          elif [ -n "$SUPER_DIRECT" ]; then
+            echo "Found super.img directly: $SUPER_DIRECT"
+            cp "$SUPER_DIRECT" firmware_super.img
+            echo "needs_pac_extract=false" >> "$GITHUB_ENV"
+          else
+            echo "No .pac or super.img found. Full listing:"
+            find firmware_extracted -type f
+            exit 1
+          fi
 
       - name: Unpack super.img from the .pac
+        if: env.needs_pac_extract == 'true'
         run: |
           git clone --depth 1 https://github.com/bismoy-bot/PAC-Extractor.git pac-extractor
           python3 pac-extractor/extractor.py firmware.pac pac_unpacked
