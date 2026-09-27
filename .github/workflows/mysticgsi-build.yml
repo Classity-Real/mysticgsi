@@ -135,7 +135,12 @@ jobs:
             local m
             m=$(file -b --mime-type "$src")
             case "$m" in
-              application/zip)
+              # JAR / APK / OTA zips all share the ZIP format; `file` often
+              # returns application/java-archive for Android OTA packages.
+              application/zip|\
+              application/java-archive|\
+              application/x-zip-compressed|\
+              application/x-zip)
                 unzip -o "$src" -d "$dst" ;;
               application/x-7z-compressed)
                 7z x "$src" -o"$dst" ;;
@@ -146,10 +151,25 @@ jobs:
                   unrar-free x "$src" "$dst"/ 2>/dev/null \
                     || 7z x "$src" -o"$dst"
                 fi ;;
-              application/x-tar|application/gzip|application/x-bzip2|application/x-xz)
+              application/x-tar|application/gzip|\
+              application/x-bzip2|application/x-xz)
                 tar -xf "$src" -C "$dst" ;;
               *)
-                cp "$src" "$dst/" ;;
+                # Extension-based second guess (MIME may be generic octet-stream)
+                case "${src##*.}" in
+                  zip|apk|jar) unzip -o "$src" -d "$dst" ;;
+                  7z)          7z x "$src" -o"$dst" ;;
+                  rar)         unrar x -o+ "$src" "$dst"/ 2>/dev/null \
+                                 || 7z x "$src" -o"$dst" ;;
+                  tar|tgz|gz|bz2|xz) tar -xf "$src" -C "$dst" ;;
+                  *)
+                    # Last resort: test zip magic regardless of label
+                    if unzip -t "$src" >/dev/null 2>&1; then
+                      unzip -o "$src" -d "$dst"
+                    else
+                      cp "$src" "$dst/"
+                    fi ;;
+                esac ;;
             esac
           }
 
@@ -220,8 +240,25 @@ jobs:
             detect_in_dir firmware_extracted
             echo "First-pass detection: type='$DETECTED_TYPE'  file='$DETECTED_FILE'"
 
-            # If nothing found and there's a nested zip (Pixel factory etc.),
-            # extract it and scan one more level.
+            # Loop guard: if extraction was a silent no-op (cp instead of unzip),
+            # firmware_extracted contains only the original zip renamed.
+            # Detect that and force-unzip before falling into the nested-zip path.
+            if [ -z "$DETECTED_FILE" ] && [ -n "$NESTED_ZIP" ]; then
+              EXTRACTED_COUNT=$(find firmware_extracted -type f | wc -l)
+              if [ "$EXTRACTED_COUNT" -eq 1 ]; then
+                echo "Extraction was a no-op copy — force-unzipping: $NESTED_ZIP"
+                mkdir -p firmware_extracted_force
+                unzip -o "$NESTED_ZIP" -d firmware_extracted_force
+                echo "Contents after force-unzip:"
+                find firmware_extracted_force -maxdepth 5 -type f | sort | head -80
+                detect_in_dir firmware_extracted_force
+                echo "Force-unzip detection: type='$DETECTED_TYPE'  file='$DETECTED_FILE'"
+                # Consumed — skip the generic nested-zip pass below
+                [ -n "$DETECTED_FILE" ] && NESTED_ZIP=""
+              fi
+            fi
+
+            # Nested zip (e.g. Pixel factory image-*.zip wrapping partition images)
             if [ -z "$DETECTED_FILE" ] && [ -n "$NESTED_ZIP" ]; then
               echo "No firmware found; extracting nested zip: $NESTED_ZIP"
               extract_archive "$NESTED_ZIP" firmware_extracted_inner
@@ -262,6 +299,18 @@ jobs:
             | while IFS= read -r -d '' f; do
                 echo "Compressing: $f"
                 xz -9e -T0 -v "$f"
+                XZ="${f}.xz"
+                SIZE=$(stat -c%s "$XZ")
+                # GitHub release asset hard limit: 2 147 483 648 bytes (2 GiB).
+                # Split at 1.9 GiB to stay clear of the ceiling.
+                if [ "$SIZE" -gt 1900000000 ]; then
+                  echo "Asset is $(( SIZE / 1048576 )) MiB — splitting into 1.9 GiB chunks"
+                  split -b 1900M "$XZ" "${XZ}."
+                  rm "$XZ"
+                  ls -lh "${XZ}."*
+                else
+                  echo "Asset is $(( SIZE / 1048576 )) MiB — no split needed"
+                fi
               done
           ls -lh "$OUT_DIR"
 
@@ -276,8 +325,14 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ github.event.inputs.build_name }}
+          body: |
+            To reassemble split parts (*.xz.aa, *.xz.ab, …):
+            ```
+            cat *.xz.* > system.img.xz && xz -d system.img.xz
+            ```
+            Single-file releases need no reassembly.
           files: |
-            out/${{ github.event.inputs.build_name }}/*.xz
+            out/${{ github.event.inputs.build_name }}/*.xz*
             out/${{ github.event.inputs.build_name }}/*.txt
           generate_release_notes: false
         env:
